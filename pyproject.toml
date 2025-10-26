@@ -1,7 +1,7 @@
 [project]
-name = "pulsar-release-dev"
+name = "pulsar"
 version = "0.1.0"
-description = "Add your description here"
+description = "PULSAR (Patient Understanding Leveraging Single-cell universAl Representation) is a multi-scale, multi-cellular foundation model for human peripheral immunity that bridges single-cell atlases with clinical phenotypes. PULSAR hierarchically integrates information from genes to cells to multicellular systems, trained via self-supervision on 36.2 million cells from 6,807 donors."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
