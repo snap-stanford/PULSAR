@@ -66,8 +66,8 @@ model = PULSAR.from_pretrained("KuanP/PULSAR-pbmc")
 
 ## DONORxEMBED Datasets
 
-We release the DONORxEMBED datasets for both zero-shot and aligned PULSAR, you can find example for loading the datasets here [tbd](./examples).
 
+We release the DONORxEMBED datasets for both zero-shot and aligned PULSAR, you can find example for loading the datasets [here](./examples/example_DONORxEMBED_search.ipynb).
 
 | Dataset | Download |
 |---------|----------|
