@@ -1,4 +1,5 @@
-# PULSAR: Towards a Donor Foundation Model with Multicellular AI Virtual Cell
+# PULSAR: a Foundation Model for Multi-scale and Multicellular Biology
+
 
 PULSAR (Patient Understanding Leveraging Single-cell universAl Representation) is a multi-scale, multicellular foundation model that integrates information from genes to cells to multicellular systems. PULSAR bridges massive scRNA-seq datasets with clinical phenotypes for human peripheral immunity, trained via self-supervision on 36.2 million cells from 6,807 donors.
 
