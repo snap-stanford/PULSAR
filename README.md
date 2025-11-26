@@ -1,11 +1,11 @@
 # PULSAR: Towards a Donor Foundation Model with Multicellular AI Virtual Cell
 
-PULSAR (Patient Understanding Leveraging Single-cell universAl Representation) is a multi-scale, multi-cellular foundation model for human peripheral immunity that bridges single-cell atlases with clinical phenotypes. PULSAR hierarchically integrates information from genes to cells to multicellular systems, trained via self-supervision on 36.2 million cells from 6,807 donors.
+PULSAR (Patient Understanding Leveraging Single-cell universAl Representation) is a multi-scale, multicellular foundation model that integrates information from genes to cells to multicellular systems. PULSAR bridges massive scRNA-seq datasets with clinical phenotypes for human peripheral immunity, trained via self-supervision on 36.2 million cells from 6,807 donors.
 
 <!-- insert image PULSAR-release-dev/assets/cover.png -->
 ![](./assets/cover.png)
 
-| [Preprint](placeholder) |
+| [Preprint](https://www.biorxiv.org/content/10.1101/2025.11.24.685470v1) |
 
 
 ## Installation
@@ -89,5 +89,16 @@ We sincerely thank the authors of following open-source projects:
 
 ## Cite Us
 ```
-placeholder
+@article {pang2025pulsar,
+	author = {Pang, Kuan and Rosen, Yanay and Kedzierska, Kasia and He, Ziyuan and Rajagopal, Abhe and Gustafson, Claire E and Huynh, Grace and Leskovec, Jure},
+	title = {PULSAR: a Foundation Model for Multi-scale and Multicellular Biology},
+	elocation-id = {2025.11.24.685470},
+	year = {2025},
+	doi = {10.1101/2025.11.24.685470},
+	publisher = {Cold Spring Harbor Laboratory},
+	URL = {https://www.biorxiv.org/content/early/2025/11/26/2025.11.24.685470},
+	eprint = {https://www.biorxiv.org/content/early/2025/11/26/2025.11.24.685470.full.pdf},
+	journal = {bioRxiv}
+}
+
 ```
