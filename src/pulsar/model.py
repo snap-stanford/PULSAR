@@ -646,3 +646,150 @@ class PULSARForClassification(PULSARPreTrainedModel):
         return UCEClassificationOutput(loss=loss, logits=logits, cls_embedding=cls_output)
 
 
+class VirtualInstrument(nn.Module):
+    """Virtual perturbation instrument using FiLM (Feature-wise Linear Modulation).
+
+    Predicts the post-perturbation donor embedding given a baseline donor
+    embedding and a perturbation-condition representation. The condition
+    representation modulates the donor features via learned scale (gamma) and
+    shift (beta) parameters, allowing the network to simulate how a donor's
+    immune profile would change under a given perturbation.
+
+    Args:
+        input_dim: Dimensionality of the donor embedding.
+        output_dim: Dimensionality of the predicted output embedding.
+        condition_dim: Dimensionality of the perturbation-condition representation.
+        hidden_dim: Hidden layer size for internal networks.
+        dropout: General dropout rate for the output network.
+        donor_dropout: Dropout rate applied to the donor embedding pathway.
+        condition_dropout: Dropout rate applied to the condition pathway.
+        use_residual: If ``True``, add the original donor embedding to the
+            output (residual connection).
+        apply_input_dropout: If ``True``, apply light dropout directly to
+            the raw donor and condition inputs before processing.
+    """
+
+    def __init__(
+        self,
+        input_dim: int = 512,
+        output_dim: int = 512,
+        condition_dim: int = 5120,
+        hidden_dim: int = 512,
+        dropout: float = 0.1,
+        donor_dropout: float = 0.15,
+        condition_dropout: float = 0.1,
+        use_residual: bool = True,
+        apply_input_dropout: bool = True,
+    ):
+        super().__init__()
+
+        self.input_dim = input_dim
+        self.use_residual = use_residual
+        self.apply_input_dropout = apply_input_dropout
+
+        # Input dropout layers
+        self.donor_input_dropout = nn.Dropout(donor_dropout * 0.5) if apply_input_dropout else nn.Identity()
+        self.condition_input_dropout = nn.Dropout(condition_dropout * 0.5) if apply_input_dropout else nn.Identity()
+
+        # Donor embedding network
+        self.donor_net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(donor_dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(donor_dropout * 0.7),
+        )
+
+        # FiLM modulation: condition -> scale (gamma)
+        self.cond_to_gamma = nn.Sequential(
+            nn.Linear(condition_dim, hidden_dim * 2),
+            nn.LayerNorm(hidden_dim * 2),
+            nn.GELU(),
+            nn.Dropout(condition_dropout),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+        )
+
+        # FiLM modulation: condition -> shift (beta)
+        self.cond_to_beta = nn.Sequential(
+            nn.Linear(condition_dim, hidden_dim * 2),
+            nn.LayerNorm(hidden_dim * 2),
+            nn.GELU(),
+            nn.Dropout(condition_dropout),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+        )
+
+        # Output projection
+        self.output_net = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize linear layers with Kaiming normal initialization."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        condition: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Predict the post-perturbation donor embedding.
+
+        Args:
+            x: Donor embedding of shape ``(batch_size, input_dim)``, or a
+                concatenation of donor embedding and condition of shape
+                ``(batch_size, input_dim + condition_dim)`` when ``condition``
+                is not provided separately.
+            condition: Perturbation-condition representation of shape
+                ``(batch_size, condition_dim)``. If ``None``, the condition
+                is split from ``x`` assuming the first ``input_dim`` columns
+                are the donor embedding and the rest are the condition.
+
+        Returns:
+            Predicted post-perturbation embedding of shape
+            ``(batch_size, output_dim)``.
+        """
+        # Handle concatenated input
+        if condition is None and x.shape[1] > self.input_dim:
+            donor_emb = x[:, :self.input_dim]
+            condition = x[:, self.input_dim:]
+        else:
+            donor_emb = x[:, :self.input_dim] if x.shape[1] > self.input_dim else x
+
+        # Apply input dropout
+        if self.apply_input_dropout:
+            donor_emb = self.donor_input_dropout(donor_emb)
+            condition = self.condition_input_dropout(condition)
+
+        # Process donor embedding
+        features = self.donor_net(donor_emb)
+
+        # Generate FiLM modulation parameters from condition
+        gamma = self.cond_to_gamma(condition)
+        beta = self.cond_to_beta(condition)
+
+        # Apply FiLM: scale and shift
+        modulated = gamma * features + beta
+
+        # Project to output space
+        output = self.output_net(modulated)
+
+        # Residual connection to baseline donor embedding
+        if self.use_residual:
+            output = output + donor_emb
+
+        return output
