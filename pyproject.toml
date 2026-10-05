@@ -5,6 +5,7 @@ description = "PULSAR (Patient Understanding Leveraging Single-cell universAl Re
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "accelerate>=1.15.0",
     "datasets>=4.2.0",
     "duckdb>=1.4.1",
     "scanpy>=1.11.4",

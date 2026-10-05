@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, Union
 
+import pandas as pd
 import torch
 from torch import nn
 from transformers.configuration_utils import PretrainedConfig
@@ -644,6 +645,121 @@ class PULSARForClassification(PULSARPreTrainedModel):
                 loss = loss_fn(logits, labels)
 
         return UCEClassificationOutput(loss=loss, logits=logits, cls_embedding=cls_output)
+
+
+class PULSARForSelfSupervisedPretraining(PULSARPreTrainedModel):
+    """
+    PULSAR model with the masked-reconstruction objective used for pre-training.
+
+    In each forward pass the cells of a donor are randomly split in two. A fraction
+    ``config.encoder_ratio`` of the cells is encoded into the donor (CLS) embedding.
+    In the remaining cells, a fraction ``config.element_mask_ratio`` of the embedding
+    dimensions is replaced by a learned mask value, and the decoder reconstructs
+    them from the donor embedding and the unmasked dimensions. The cell split and
+    the masked dimensions are redrawn on every forward pass (also in eval mode)
+    and shared across the batch.
+
+    By default the masked dimensions are drawn independently. If
+    ``config.coordinated_masking_program_path`` is set, correlated masking is used
+    instead: the file groups the embedding dimensions into programs of correlated
+    dimensions, and a fraction ``config.element_mask_ratio`` of the programs is
+    masked, each with all of its dimensions. The file is a CSV with one row per
+    embedding dimension and two columns, ``Dimension`` (0-based index) and
+    ``Cluster`` (program ID).
+    """
+
+    config_class = PULSARConfig
+
+    def __init__(self, config: PULSARConfig):
+        """
+        Initialize the PULSARForSelfSupervisedPretraining model.
+
+        Args:
+            config: Configuration object containing model parameters.
+        """
+        super().__init__(config)
+        self.pulsar = PULSAR(config)
+        self.mask_element = nn.Parameter(torch.randn(1))
+        self.in_proj_mask_embedding = Projector(config.input_size, config.hidden_size)
+
+        # Optional correlated masking: programs of dimensions that are masked together
+        self.masking_programs = None
+        if config.coordinated_masking_program_path is not None:
+            programs = pd.read_csv(config.coordinated_masking_program_path)
+            self.masking_programs = [
+                dims.tolist() for _, dims in programs.groupby("Cluster")["Dimension"]
+            ]
+
+    def sample_masked_dims(self, input_size: int, device: torch.device) -> torch.Tensor:
+        """
+        Sample the embedding dimensions to mask.
+
+        Args:
+            input_size: Number of embedding dimensions
+            device: Device of the returned tensor
+
+        Returns:
+            Indices of the masked dimensions
+        """
+        if self.masking_programs is None:
+            # Independent masking: a random subset of the dimensions
+            num_masked_dims = int(self.config.element_mask_ratio * input_size)
+            return torch.randperm(input_size, device=device)[:num_masked_dims]
+
+        # Correlated masking: a random subset of the programs, with all of their dimensions
+        num_masked_programs = int(self.config.element_mask_ratio * len(self.masking_programs))
+        selected_programs = torch.randperm(len(self.masking_programs))[:num_masked_programs]
+        masked_dims = [dim for i in selected_programs.tolist() for dim in self.masking_programs[i]]
+        return torch.tensor(masked_dims, device=device)
+
+    def forward(self, cell_embedding: torch.Tensor) -> UCEPretrainOutput:
+        """
+        Forward pass for masked-reconstruction training.
+
+        Args:
+            cell_embedding: Input cell embeddings of shape (batch_size, seq_length, embedding_size)
+
+        Returns:
+            UCEPretrainOutput containing loss, CLS embedding, and reconstructed embeddings
+        """
+        seq_length, input_size = cell_embedding.shape[1:]
+        device = cell_embedding.device
+
+        # Split cells: a random subset is encoded, the rest are reconstructed
+        num_encoder_cells = int(self.config.encoder_ratio * seq_length)
+        cell_order = torch.randperm(seq_length, device=device)
+        encoder_cells = cell_embedding[:, cell_order[:num_encoder_cells]]
+        decoder_cells = cell_embedding[:, cell_order[num_encoder_cells:]]
+
+        # Encode the visible cells into the donor (CLS) embedding
+        cls_output = self.pulsar.encode(encoder_cells)[0][:, :1, :]
+
+        # Mask embedding dimensions in the decoder cells
+        masked_dims = self.sample_masked_dims(input_size, device)
+        masked_cells = decoder_cells.clone()
+        masked_cells[:, :, masked_dims] = self.mask_element
+
+        # Reconstruct the decoder cells from the donor embedding
+        decoder_output = self.pulsar.decode(cls_output, self.in_proj_mask_embedding(masked_cells))
+        reconstructed = decoder_output[0][:, 1:, :]  # Remove CLS token
+
+        # Calculate loss on the masked dimensions only
+        loss_fn = nn.MSELoss()
+        loss = loss_fn(reconstructed[:, :, masked_dims], decoder_cells[:, :, masked_dims])
+
+        return UCEPretrainOutput(
+            loss=loss, cls_embedding=cls_output, reconstructed_embeddings=reconstructed
+        )
+
+
+class PULSARForSelfSupervisedFinetuning(PULSARForSelfSupervisedPretraining):
+    """
+    PULSAR model for self-supervised fine-tuning of a pre-trained checkpoint.
+
+    Uses the same masked-reconstruction objective as
+    ``PULSARForSelfSupervisedPretraining``: load a pre-trained checkpoint with
+    ``from_pretrained`` and continue training on new data.
+    """
 
 
 class VirtualInstrument(nn.Module):
